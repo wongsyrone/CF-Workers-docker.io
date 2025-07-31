@@ -549,6 +549,7 @@ export default {
 				const tokenData = await tokenRes.json();
 				const token = tokenData.token;
 				let parameter = {
+					redirect: "follow",
 					headers: {
 						'Host': hub_host,
 						'User-Agent': getReqHeader("User-Agent"),
@@ -565,8 +566,6 @@ export default {
 					parameter.headers['X-Amz-Content-Sha256'] = getReqHeader("X-Amz-Content-Sha256");
 				}
 				let original_response = await fetch(new Request(url, request), parameter);
-				let original_response_clone = original_response.clone();
-				let original_text = original_response_clone.body;
 				let response_headers = original_response.headers;
 				let new_response_headers = new Headers(response_headers);
 				let status = original_response.status;
@@ -575,12 +574,7 @@ export default {
 					let re = new RegExp(auth_url, 'g');
 					new_response_headers.set("Www-Authenticate", response_headers.get("Www-Authenticate").replace(re, workers_url));
 				}
-				if (new_response_headers.get("Location")) {
-					const location = new_response_headers.get("Location");
-					console.info(`Found redirection location, redirecting to ${location}`);
-					return httpHandler(request, location, hub_host);
-				}
-				let response = new Response(original_text, {
+				let response = new Response(original_response.body, {
 					status,
 					headers: new_response_headers
 				});
@@ -590,6 +584,7 @@ export default {
 
 		// 构造请求参数
 		let parameter = {
+			redirect: "follow",
 			headers: {
 				'Host': hub_host,
 				'User-Agent': getReqHeader("User-Agent"),
@@ -614,8 +609,6 @@ export default {
 
 		// 发起请求并处理响应
 		let original_response = await fetch(new Request(url, request), parameter);
-		let original_response_clone = original_response.clone();
-		let original_text = original_response_clone.body;
 		let response_headers = original_response.headers;
 		let new_response_headers = new Headers(response_headers);
 		let status = original_response.status;
@@ -627,98 +620,14 @@ export default {
 			new_response_headers.set("Www-Authenticate", response_headers.get("Www-Authenticate").replace(re, workers_url));
 		}
 
-		// 处理重定向
-		if (new_response_headers.get("Location")) {
-			const location = new_response_headers.get("Location");
-			console.info(`Found redirection location, redirecting to ${location}`);
-			return httpHandler(request, location, hub_host);
-		}
-
 		// 返回修改后的响应
-		let response = new Response(original_text, {
+		let response = new Response(original_response.body, {
 			status,
 			headers: new_response_headers
 		});
 		return response;
 	}
 };
-
-/**
- * 处理HTTP请求
- * @param {Request} req 请求对象
- * @param {string} pathname 请求路径
- * @param {string} baseHost 基地址
- */
-function httpHandler(req, pathname, baseHost) {
-	const reqHdrRaw = req.headers;
-
-	// 处理预检请求
-	if (req.method === 'OPTIONS' &&
-		reqHdrRaw.has('access-control-request-headers')
-	) {
-		return new Response(null, PREFLIGHT_INIT);
-	}
-
-	let rawLen = '';
-
-	const reqHdrNew = new Headers(reqHdrRaw);
-
-	reqHdrNew.delete("Authorization"); // 修复s3错误
-
-	const refer = reqHdrNew.get('referer');
-
-	let urlStr = pathname;
-
-	const urlObj = newUrl(urlStr, 'https://' + baseHost);
-
-	/** @type {RequestInit} */
-	const reqInit = {
-		method: req.method,
-		headers: reqHdrNew,
-		redirect: 'follow',
-		body: req.body
-	};
-	return proxy(urlObj, reqInit, rawLen);
-}
-
-/**
- * 代理请求
- * @param {URL} urlObj URL对象
- * @param {RequestInit} reqInit 请求初始化对象
- * @param {string} rawLen 原始长度
- */
-async function proxy(urlObj, reqInit, rawLen) {
-	const res = await fetch(urlObj.href, reqInit);
-	const resHdrOld = res.headers;
-	const resHdrNew = new Headers(resHdrOld);
-
-	// 验证长度
-	if (rawLen) {
-		const newLen = resHdrOld.get('content-length') || '';
-		const badLen = (rawLen !== newLen);
-
-		if (badLen) {
-			return makeRes(res.body, 400, {
-				'--error': `bad len: ${newLen}, except: ${rawLen}`,
-				'access-control-expose-headers': '--error',
-			});
-		}
-	}
-	const status = res.status;
-	resHdrNew.set('access-control-expose-headers', '*');
-	resHdrNew.set('access-control-allow-origin', '*');
-	resHdrNew.set('Cache-Control', 'max-age=1500');
-
-	// 删除不必要的头
-	resHdrNew.delete('content-security-policy');
-	resHdrNew.delete('content-security-policy-report-only');
-	resHdrNew.delete('clear-site-data');
-
-	return new Response(res.body, {
-		status,
-		headers: resHdrNew
-	});
-}
 
 async function ADD(envadd) {
 	var addtext = envadd.replace(/[	 |"'\r\n]+/g, ',').replace(/,+/g, ',');	// 将空格、双引号、单引号和换行符替换为逗号
